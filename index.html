@@ -1,0 +1,377 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NotepadAA - Notepad Bersama</title>
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f5f6f8;
+  color: #222;
+}
+
+header {
+  background: white;
+  padding: 16px 22px;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+h2 { margin: 0; font-size: 21px; }
+
+.status {
+  font-size: 12px;
+  color: #15965b;
+}
+
+nav {
+  background: white;
+  padding: 9px 15px;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+button {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 9px 13px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+button:hover {
+  background: #edf3ff;
+  border-color: #9bb9ef;
+}
+
+main {
+  max-width: 1200px;
+  margin: 20px auto;
+  padding: 0 15px;
+}
+
+.toolbar {
+  background: white;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#editor {
+  width: 100%;
+  min-height: 70vh;
+  padding: 22px;
+  resize: vertical;
+  border: 1px solid #ddd;
+  border-radius: 0 0 7px 7px;
+  outline: none;
+  font-family: Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.7;
+  background: white;
+  color: #222;
+}
+
+#editor:focus {
+  border-color: #8aaef0;
+}
+
+footer {
+  text-align: center;
+  color: #888;
+  padding: 18px;
+  font-size: 12px;
+}
+
+@media(max-width:600px) {
+  header { padding: 14px; }
+  nav button { flex: 1 1 auto; }
+  #editor { min-height: 65vh; padding: 13px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h2>📝 NotepadAA</h2>
+  <span class="status" id="status">Menghubungkan...</span>
+</header>
+
+<nav>
+  <button onclick="newFile()">New</button>
+  <button onclick="document.getElementById('fileInput').click()">Open</button>
+  <button onclick="saveFile()">Save</button>
+  <button onclick="saveAs()">Save As</button>
+  <button onclick="findText()">Find</button>
+  <button onclick="cutText()">Cut</button>
+  <button onclick="copyText()">Copy</button>
+  <button onclick="pasteText()">Paste</button>
+  <button onclick="deleteText()">Delete</button>
+  <button onclick="selectAll()">Select All</button>
+  <button onclick="insertDate()">Time/Date</button>
+  <button onclick="about()">About</button>
+  <input type="file" id="fileInput" accept=".txt,text/plain" hidden>
+</nav>
+
+<main>
+  <div class="toolbar">
+    <span id="wordCount">0 kata | 0 karakter</span>
+    <span id="syncStatus">Shared document</span>
+  </div>
+
+  <textarea
+    id="editor"
+    placeholder="Mulai menulis di NotepadAA...
+
+Semua orang yang membuka website ini dapat membaca dan mengedit dokumen yang sama."
+    spellcheck="false"
+  ></textarea>
+</main>
+
+<footer>
+  NotepadAA © 2026 | Shared Online Notepad
+</footer>
+
+<script>
+const editor = document.getElementById("editor");
+const status = document.getElementById("status");
+const syncStatus = document.getElementById("syncStatus");
+const wordCount = document.getElementById("wordCount");
+
+let dirty = false;
+let saving = false;
+let timer = null;
+let lastSynced = "";
+
+function updateCount() {
+  const text = editor.value;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  wordCount.textContent =
+    `${words} kata | ${text.length} karakter`;
+}
+
+function setStatus(message, color = "#15965b") {
+  status.textContent = message;
+  status.style.color = color;
+}
+
+async function loadDocument() {
+  try {
+    const response = await fetch("/api/document", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) throw new Error("Gagal mengambil dokumen");
+
+    const data = await response.json();
+    editor.value = data.content || "";
+    lastSynced = editor.value;
+
+    updateCount();
+    setStatus("● Terhubung");
+    syncStatus.textContent = "Dokumen bersama aktif";
+  } catch (error) {
+    setStatus("Koneksi gagal", "red");
+    syncStatus.textContent = "Tidak dapat memuat dokumen";
+  }
+}
+
+async function saveFile() {
+  if (saving) return;
+
+  const snapshot = editor.value;
+  saving = true;
+  setStatus("Menyimpan...", "#c58b00");
+
+  try {
+    const response = await fetch("/api/document", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: snapshot })
+    });
+
+    if (!response.ok) throw new Error("Gagal menyimpan");
+
+    lastSynced = snapshot;
+    if (editor.value === snapshot) dirty = false;
+
+    setStatus("● Tersimpan");
+    syncStatus.textContent = "Semua perubahan tersimpan";
+  } catch (error) {
+    setStatus("Gagal menyimpan", "red");
+    syncStatus.textContent = "Periksa koneksi internet";
+  } finally {
+    saving = false;
+  }
+}
+
+editor.addEventListener("input", () => {
+  dirty = true;
+  updateCount();
+  setStatus("Ada perubahan...", "#c58b00");
+
+  clearTimeout(timer);
+  timer = setTimeout(saveFile, 900);
+});
+
+async function syncDocument() {
+  if (dirty || saving || document.activeElement === editor) return;
+
+  try {
+    const response = await fetch("/api/document", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) return;
+
+    const data = await response.json();
+
+    if (data.content !== lastSynced) {
+      editor.value = data.content || "";
+      lastSynced = editor.value;
+      updateCount();
+      syncStatus.textContent = "Dokumen diperbarui pengguna lain";
+    }
+  } catch (error) {
+    setStatus("Koneksi terputus", "red");
+  }
+}
+
+editor.addEventListener("blur", () => {
+  if (dirty) saveFile();
+  else syncDocument();
+});
+
+setInterval(syncDocument, 2500);
+
+function newFile() {
+  if (!confirm("Kosongkan dokumen bersama untuk semua orang?")) return;
+  editor.value = "";
+  dirty = true;
+  updateCount();
+  saveFile();
+}
+
+document.getElementById("fileInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (!confirm("Muat file ini ke dokumen bersama?")) {
+    e.target.value = "";
+    return;
+  }
+
+  editor.value = await file.text();
+  dirty = true;
+  updateCount();
+  saveFile();
+  e.target.value = "";
+});
+
+function saveAs() {
+  const blob = new Blob([editor.value], {
+    type: "text/plain;charset=utf-8"
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "notepadaa.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function findText() {
+  const word = prompt("Find what?");
+  if (!word) return;
+
+  const index = editor.value.toLowerCase().indexOf(word.toLowerCase());
+
+  if (index === -1) {
+    alert("Teks tidak ditemukan");
+  } else {
+    editor.focus();
+    editor.setSelectionRange(index, index + word.length);
+  }
+}
+
+function cutText() {
+  document.execCommand("cut");
+}
+
+function copyText() {
+  const selected = editor.value.substring(
+    editor.selectionStart, editor.selectionEnd
+  );
+
+  if (selected) {
+    navigator.clipboard?.writeText(selected);
+  } else {
+    navigator.clipboard?.writeText(editor.value);
+  }
+}
+
+async function pasteText() {
+  try {
+    const text = await navigator.clipboard.readText();
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+
+    editor.setRangeText(text, start, end, "end");
+    editor.dispatchEvent(new Event("input"));
+    editor.focus();
+  } catch (error) {
+    alert("Gunakan Ctrl+V atau izinkan akses clipboard.");
+  }
+}
+
+function deleteText() {
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+
+  if (start !== end) {
+    editor.setRangeText("", start, end, "start");
+    editor.dispatchEvent(new Event("input"));
+  }
+}
+
+function selectAll() {
+  editor.focus();
+  editor.select();
+}
+
+function insertDate() {
+  const date = new Date().toLocaleString("id-ID");
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+
+  editor.setRangeText(date, start, end, "end");
+  editor.dispatchEvent(new Event("input"));
+}
+
+function about() {
+  alert("NotepadAA\nNotepad Bersama Online\nSemua orang dapat mengedit dokumen bersama.");
+}
+
+loadDocument();
+</script>
+
+</body>
+</html>
